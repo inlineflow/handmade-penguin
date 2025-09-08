@@ -1,0 +1,4 @@
+IndentCaseLabels: true
+BraceWrapping:
+  AfterCaseLabel: true
+
