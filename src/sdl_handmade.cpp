@@ -1,7 +1,41 @@
 // #include "SDL_render.h"
+#include "SDL_pixels.h"
 #include "SDL_render.h"
 #include "SDL_video.h"
 #include <SDL.h>
+#include <sys/mman.h>
+
+#define global_variable static
+#define internal static
+
+global_variable void *pixels;
+global_variable SDL_Texture *Texture;
+global_variable int TextureWidth;
+
+internal void SDLResizeTexture(SDL_Renderer *renderer, int width, int height) {
+  if (pixels) {
+    munmap(pixels, 4096);
+  }
+
+  if (Texture) {
+    SDL_DestroyTexture(Texture);
+  }
+
+  SDL_Texture *Texture =
+      SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
+                        SDL_TEXTUREACCESS_STREAMING, width, height);
+
+  void *pixels = mmap(nullptr, 4096, PROT_WRITE | PROT_READ,
+                      MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+}
+
+internal void SDLUpdateWindow(SDL_Window *Window, SDL_Renderer *Renderer) {
+  SDL_UpdateTexture(Texture, 0, pixels, TextureWidth * 4);
+
+  SDL_RenderCopy(Renderer, Texture, 0, 0);
+
+  SDL_RenderPresent(Renderer);
+}
 
 // mine
 bool HandleEvent(SDL_Event *Event) {
@@ -13,23 +47,15 @@ bool HandleEvent(SDL_Event *Event) {
     } break;
     case SDL_WINDOWEVENT: {
       switch (Event->window.event) {
-        case SDL_WINDOWEVENT_RESIZED: {
-          printf("SDL_WINDOWEVENT_RESIZED (%d, %d)\n", Event->window.data1,
-                 Event->window.data2);
+        case SDL_WINDOWEVENT_SIZE_CHANGED: {
+          SDL_Window *Window = SDL_GetWindowFromID(Event->window.windowID);
+          SDL_Renderer *Renderer = SDL_GetRenderer(Window);
+          SDLUpdateWindow(Window, Renderer);
         } break;
         case SDL_WINDOWEVENT_EXPOSED: {
           SDL_Window *Window = SDL_GetWindowFromID(Event->window.windowID);
           SDL_Renderer *Renderer = SDL_GetRenderer(Window);
-          static bool IsWhite = true;
-          if (IsWhite == true) {
-            SDL_SetRenderDrawColor(Renderer, 255, 255, 255, 255);
-            IsWhite = false;
-          } else {
-            SDL_SetRenderDrawColor(Renderer, 0, 0, 0, 0);
-            IsWhite = true;
-          }
-          SDL_RenderClear(Renderer);
-          SDL_RenderPresent(Renderer);
+          SDLUpdateWindow(Window, Renderer);
         } break;
       }
 
