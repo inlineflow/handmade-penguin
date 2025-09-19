@@ -3,34 +3,66 @@
 #include "SDL_render.h"
 #include "SDL_video.h"
 #include <SDL.h>
+#include <cstdint>
+#include <stdint.h>
 #include <sys/mman.h>
 
 #define global_variable static
 #define internal static
 
-global_variable void *pixels;
+// typedef unsigned char uint8;
+typedef uint8_t uint8;
+typedef uint32_t uint32;
+
+global_variable void *BitmapMemory;
 global_variable SDL_Texture *Texture;
-global_variable int TextureWidth;
+global_variable int BitmapWidth;
+global_variable int BitmapHeight;
+const int BytesPerPixel = 4;
 
 internal void SDLResizeTexture(SDL_Renderer *renderer, int width, int height) {
-  if (pixels) {
-    munmap(pixels, 4096);
+  if (BitmapMemory) {
+    munmap(BitmapMemory, height * width * BytesPerPixel);
   }
+
+  BitmapHeight = height;
+  BitmapWidth = width;
 
   if (Texture) {
     SDL_DestroyTexture(Texture);
   }
 
-  SDL_Texture *Texture =
-      SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
-                        SDL_TEXTUREACCESS_STREAMING, width, height);
+  Texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
+                              SDL_TEXTUREACCESS_STREAMING, width, height);
 
-  void *pixels = mmap(nullptr, 4096, PROT_WRITE | PROT_READ,
+  BitmapMemory = mmap(0, height * width * BytesPerPixel, PROT_WRITE | PROT_READ,
                       MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+
+  int Pitch = width * BytesPerPixel;
+  uint8 *Row = (uint8 *)BitmapMemory;
+  for (int Y = 0; Y < BitmapHeight; ++Y) {
+    // uint32 *Pixel = (uint32 *)Row;
+    uint8 *Pixel = (uint8 *)Row;
+    for (int X = 0; X < BitmapWidth; ++X) {
+      *Pixel = 255;
+      ++Pixel;
+
+      *Pixel = 0;
+      ++Pixel;
+
+      *Pixel = 0;
+      ++Pixel;
+
+      *Pixel = 0;
+      ++Pixel;
+    }
+
+    Row += Pitch;
+  }
 }
 
 internal void SDLUpdateWindow(SDL_Window *Window, SDL_Renderer *Renderer) {
-  SDL_UpdateTexture(Texture, 0, pixels, TextureWidth * 4);
+  SDL_UpdateTexture(Texture, 0, BitmapMemory, BitmapWidth * BytesPerPixel);
 
   SDL_RenderCopy(Renderer, Texture, 0, 0);
 
@@ -50,7 +82,7 @@ bool HandleEvent(SDL_Event *Event) {
         case SDL_WINDOWEVENT_SIZE_CHANGED: {
           SDL_Window *Window = SDL_GetWindowFromID(Event->window.windowID);
           SDL_Renderer *Renderer = SDL_GetRenderer(Window);
-          SDLUpdateWindow(Window, Renderer);
+          SDLResizeTexture(Renderer, Event->window.data1, Event->window.data2);
         } break;
         case SDL_WINDOWEVENT_EXPOSED: {
           SDL_Window *Window = SDL_GetWindowFromID(Event->window.windowID);
