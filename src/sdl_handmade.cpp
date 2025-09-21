@@ -1,5 +1,4 @@
 // #include "SDL_render.h"
-#include "SDL_pixels.h"
 #include "SDL_render.h"
 #include "SDL_video.h"
 #include <SDL.h>
