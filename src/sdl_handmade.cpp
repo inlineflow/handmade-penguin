@@ -1,4 +1,5 @@
 // #include "SDL_render.h"
+#include "SDL_events.h"
 #include "SDL_render.h"
 #include "SDL_video.h"
 #include <SDL.h>
@@ -19,17 +20,36 @@ global_variable int BitmapWidth;
 global_variable int BitmapHeight;
 const int BytesPerPixel = 4;
 
+internal void RenderWeirdGradient(int XOffset, int YOffset) {
+  int Width = BitmapWidth;
+  int Height = BitmapHeight;
+  int Pitch = Width * BytesPerPixel;
+  uint8 *Row = (uint8 *)BitmapMemory;
+  for (int Y = 0; Y < BitmapHeight; ++Y) {
+    uint32 *Pixel = (uint32 *)Row;
+    // uint8 *Pixel = (uint8 *)Row;
+    for (int X = 0; X < BitmapWidth; ++X) {
+      uint8 Blue = (X + XOffset);
+      uint8 Green = (Y + YOffset);
+
+      *Pixel++ = ((Green << 8) | Blue);
+    }
+
+    Row += Pitch;
+  }
+}
+
 internal void SDLResizeTexture(SDL_Renderer *renderer, int width, int height) {
+
   if (BitmapMemory) {
-    munmap(BitmapMemory, height * width * BytesPerPixel);
+    munmap(BitmapMemory, BitmapHeight * BitmapWidth * BytesPerPixel);
+  }
+  if (Texture) {
+    SDL_DestroyTexture(Texture);
   }
 
   BitmapHeight = height;
   BitmapWidth = width;
-
-  if (Texture) {
-    SDL_DestroyTexture(Texture);
-  }
 
   Texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
                               SDL_TEXTUREACCESS_STREAMING, width, height);
@@ -37,27 +57,7 @@ internal void SDLResizeTexture(SDL_Renderer *renderer, int width, int height) {
   BitmapMemory = mmap(0, height * width * BytesPerPixel, PROT_WRITE | PROT_READ,
                       MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
 
-  int Pitch = width * BytesPerPixel;
-  uint8 *Row = (uint8 *)BitmapMemory;
-  for (int Y = 0; Y < BitmapHeight; ++Y) {
-    // uint32 *Pixel = (uint32 *)Row;
-    uint8 *Pixel = (uint8 *)Row;
-    for (int X = 0; X < BitmapWidth; ++X) {
-      *Pixel = 255;
-      ++Pixel;
-
-      *Pixel = 0;
-      ++Pixel;
-
-      *Pixel = 0;
-      ++Pixel;
-
-      *Pixel = 0;
-      ++Pixel;
-    }
-
-    Row += Pitch;
-  }
+  // RenderWeirdGradient(0, 0);
 }
 
 internal void SDLUpdateWindow(SDL_Window *Window, SDL_Renderer *Renderer) {
@@ -68,7 +68,6 @@ internal void SDLUpdateWindow(SDL_Window *Window, SDL_Renderer *Renderer) {
   SDL_RenderPresent(Renderer);
 }
 
-// mine
 bool HandleEvent(SDL_Event *Event) {
   bool ShouldQuit = false;
   switch (Event->type) {
@@ -107,20 +106,33 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
+  int Width, Height;
+  SDL_GetWindowSize(Window, &Width, &Height);
+
   SDL_Renderer *Renderer = SDL_CreateRenderer(Window, -1, 0);
   if (!Renderer) {
     printf("Failed to create renderer: %s\n", SDL_GetError());
     return 1;
   }
 
+  SDLResizeTexture(Renderer, Width, Height);
   SDL_ShowWindow(Window);
 
-  for (;;) {
+  bool Running = true;
+
+  int XOffset = 0;
+  int YOffset = 0;
+  while (Running) {
     SDL_Event Event;
-    SDL_WaitEvent(&Event);
-    if (HandleEvent(&Event)) {
-      break;
+    while (SDL_PollEvent(&Event)) {
+      if (HandleEvent(&Event)) {
+        Running = false;
+      }
     }
+
+    RenderWeirdGradient(XOffset, YOffset);
+    SDLUpdateWindow(Window, Renderer);
+    XOffset += 12;
   }
 
   SDL_Quit();
