@@ -14,21 +14,24 @@
 typedef uint8_t uint8;
 typedef uint32_t uint32;
 
-global_variable void *BitmapMemory;
-global_variable SDL_Texture *Texture;
-global_variable int BitmapWidth;
-global_variable int BitmapHeight;
-const int BytesPerPixel = 4;
+struct sdl_offscreen_buffer {
+  void *Memory;
+  SDL_Texture *Texture;
+  int Width;
+  int Height;
+  int BytesPerPixel;
+};
 
-internal void RenderWeirdGradient(int XOffset, int YOffset) {
-  int Width = BitmapWidth;
-  int Height = BitmapHeight;
-  int Pitch = Width * BytesPerPixel;
-  uint8 *Row = (uint8 *)BitmapMemory;
-  for (int Y = 0; Y < BitmapHeight; ++Y) {
+internal void RenderWeirdGradient(sdl_offscreen_buffer buf, int XOffset,
+                                  int YOffset) {
+  int Width = buf.Width;
+  int Height = buf.Height;
+  uint8 *Row = (uint8 *)buf.Memory;
+  int Pitch = Width * buf.BytesPerPixel;
+  for (int Y = 0; Y < buf.Height; ++Y) {
     uint32 *Pixel = (uint32 *)Row;
     // uint8 *Pixel = (uint8 *)Row;
-    for (int X = 0; X < BitmapWidth; ++X) {
+    for (int X = 0; X < buf.Width; ++X) {
       uint8 Blue = (X + XOffset);
       uint8 Green = (Y + YOffset);
 
@@ -39,36 +42,40 @@ internal void RenderWeirdGradient(int XOffset, int YOffset) {
   }
 }
 
-internal void SDLResizeTexture(SDL_Renderer *renderer, int width, int height) {
+internal void SDLResizeTexture(sdl_offscreen_buffer *buf,
+                               SDL_Renderer *renderer, int width, int height) {
 
-  if (BitmapMemory) {
-    munmap(BitmapMemory, BitmapHeight * BitmapWidth * BytesPerPixel);
+  if (buf->Memory) {
+    munmap(buf->Memory, buf->Height * buf->Width * buf->BytesPerPixel);
   }
-  if (Texture) {
-    SDL_DestroyTexture(Texture);
+  if (buf->Texture) {
+    SDL_DestroyTexture(buf->Texture);
   }
 
-  BitmapHeight = height;
-  BitmapWidth = width;
+  buf->Height = height;
+  buf->Width = width;
 
-  Texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
-                              SDL_TEXTUREACCESS_STREAMING, width, height);
+  buf->Texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
+                                   SDL_TEXTUREACCESS_STREAMING, width, height);
 
-  BitmapMemory = mmap(0, height * width * BytesPerPixel, PROT_WRITE | PROT_READ,
-                      MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+  buf->Memory =
+      mmap(0, height * width * buf->BytesPerPixel, PROT_WRITE | PROT_READ,
+           MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
 
   // RenderWeirdGradient(0, 0);
 }
 
-internal void SDLUpdateWindow(SDL_Window *Window, SDL_Renderer *Renderer) {
-  SDL_UpdateTexture(Texture, 0, BitmapMemory, BitmapWidth * BytesPerPixel);
+internal void SDLUpdateWindow(sdl_offscreen_buffer *buf, SDL_Window *Window,
+                              SDL_Renderer *Renderer) {
+  SDL_UpdateTexture(buf->Texture, 0, buf->Memory,
+                    buf->Width * buf->BytesPerPixel);
 
-  SDL_RenderCopy(Renderer, Texture, 0, 0);
+  SDL_RenderCopy(Renderer, buf->Texture, 0, 0);
 
   SDL_RenderPresent(Renderer);
 }
 
-bool HandleEvent(SDL_Event *Event) {
+bool HandleEvent(SDL_Event *Event, sdl_offscreen_buffer *buf) {
   bool ShouldQuit = false;
   switch (Event->type) {
     case SDL_QUIT: {
@@ -80,12 +87,13 @@ bool HandleEvent(SDL_Event *Event) {
         case SDL_WINDOWEVENT_SIZE_CHANGED: {
           SDL_Window *Window = SDL_GetWindowFromID(Event->window.windowID);
           SDL_Renderer *Renderer = SDL_GetRenderer(Window);
-          SDLResizeTexture(Renderer, Event->window.data1, Event->window.data2);
+          // SDLResizeTexture(buf, Renderer, Event->window.data1,
+          //                  Event->window.data2);
         } break;
         case SDL_WINDOWEVENT_EXPOSED: {
           SDL_Window *Window = SDL_GetWindowFromID(Event->window.windowID);
           SDL_Renderer *Renderer = SDL_GetRenderer(Window);
-          SDLUpdateWindow(Window, Renderer);
+          SDLUpdateWindow(buf, Window, Renderer);
         } break;
       }
 
@@ -115,7 +123,11 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  SDLResizeTexture(Renderer, Width, Height);
+  struct sdl_offscreen_buffer buf{
+      .BytesPerPixel = 4,
+  };
+  int Pitch = Width * buf.BytesPerPixel;
+  SDLResizeTexture(&buf, Renderer, Width, Height);
   SDL_ShowWindow(Window);
 
   bool Running = true;
@@ -125,13 +137,13 @@ int main(int argc, char *argv[]) {
   while (Running) {
     SDL_Event Event;
     while (SDL_PollEvent(&Event)) {
-      if (HandleEvent(&Event)) {
+      if (HandleEvent(&Event, &buf)) {
         Running = false;
       }
     }
 
-    RenderWeirdGradient(XOffset, YOffset);
-    SDLUpdateWindow(Window, Renderer);
+    RenderWeirdGradient(buf, XOffset, YOffset);
+    SDLUpdateWindow(&buf, Window, Renderer);
     XOffset += 12;
   }
 
