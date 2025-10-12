@@ -1,5 +1,7 @@
 // #include "SDL_render.h"
 #include "SDL_events.h"
+#include "SDL_gamecontroller.h"
+#include "SDL_joystick.h"
 #include "SDL_render.h"
 #include "SDL_video.h"
 #include <SDL.h>
@@ -9,6 +11,8 @@
 
 #define global_variable static
 #define internal static
+#define MAX_CONTROLLERS 4
+SDL_GameController *ControllerHandles[MAX_CONTROLLERS];
 
 // typedef unsigned char uint8;
 typedef uint8_t uint8;
@@ -117,7 +121,7 @@ bool HandleEvent(SDL_Event *Event, sdl_offscreen_buffer *buf) {
 }
 
 int main(int argc, char *argv[]) {
-  SDL_Init(SDL_INIT_VIDEO);
+  SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER);
 
   SDL_Window *Window =
       SDL_CreateWindow("Handmade Hero", SDL_WINDOWPOS_UNDEFINED,
@@ -155,6 +159,28 @@ int main(int argc, char *argv[]) {
     RenderWeirdGradient(buf, XOffset, YOffset);
     SDLUpdateWindow(&buf, Window, Renderer);
     XOffset += 12;
+  }
+
+  int CountJoysticks = SDL_NumJoysticks();
+  int controller_index = 0;
+  for (int joystick_index = 0; joystick_index < CountJoysticks;
+       ++joystick_index) {
+    if (!SDL_IsGameController(joystick_index)) {
+      continue;
+    }
+
+    if (controller_index >= MAX_CONTROLLERS) {
+      break;
+    }
+    ControllerHandles[controller_index] =
+        SDL_GameControllerOpen(joystick_index);
+    controller_index++;
+  }
+
+  for (int i = 0; i < MAX_CONTROLLERS; i++) {
+    if (ControllerHandles[i]) {
+      SDL_GameControllerClose(ControllerHandles[i]);
+    }
   }
 
   SDL_Quit();
