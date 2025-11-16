@@ -1,6 +1,7 @@
 // #include "SDL_render.h"
 #include "SDL_events.h"
 #include "SDL_gamecontroller.h"
+#include "SDL_haptic.h"
 #include "SDL_joystick.h"
 #include "SDL_render.h"
 #include "SDL_video.h"
@@ -13,11 +14,12 @@
 #define internal static
 #define MAX_CONTROLLERS 4
 SDL_GameController *ControllerHandles[MAX_CONTROLLERS];
+SDL_Haptic *RumbleHandles[MAX_CONTROLLERS];
 
 // typedef unsigned char uint8;
 typedef uint8_t uint8;
 typedef uint32_t uint32;
-
+typedef int16_t int16;
 struct sdl_offscreen_buffer {
   // NOTE(casey): Pixels are alwasy 32-bits wide, Memory Order BB GG RR XX
   void *Memory;
@@ -120,8 +122,33 @@ bool HandleEvent(SDL_Event *Event, sdl_offscreen_buffer *buf) {
   return (ShouldQuit);
 }
 
+void setup_controllers(void) {
+  int CountJoysticks = SDL_NumJoysticks();
+  int controller_index = 0;
+  for (int joystick_index = 0; joystick_index < CountJoysticks;
+       ++joystick_index) {
+    if (!SDL_IsGameController(joystick_index)) {
+      continue;
+    }
+
+    if (controller_index >= MAX_CONTROLLERS) {
+      break;
+    }
+    ControllerHandles[controller_index] =
+        SDL_GameControllerOpen(joystick_index);
+    RumbleHandles[controller_index] = SDL_HapticOpen(joystick_index);
+    SDL_Haptic *rumble = RumbleHandles[controller_index];
+    if (rumble && SDL_HapticRumbleInit(rumble) != 0) {
+      SDL_HapticClose(rumble);
+      rumble = 0;
+    }
+
+    controller_index++;
+  }
+}
+
 int main(int argc, char *argv[]) {
-  SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER);
+  SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_HAPTIC);
 
   SDL_Window *Window =
       SDL_CreateWindow("Handmade Hero", SDL_WINDOWPOS_UNDEFINED,
@@ -143,6 +170,7 @@ int main(int argc, char *argv[]) {
   struct sdl_offscreen_buffer buf{};
   SDLResizeTexture(&buf, Renderer, dimension.width, dimension.height);
   SDL_ShowWindow(Window);
+  setup_controllers();
 
   bool Running = true;
 
@@ -156,25 +184,32 @@ int main(int argc, char *argv[]) {
       }
     }
 
-    RenderWeirdGradient(buf, XOffset, YOffset);
-    SDLUpdateWindow(&buf, Window, Renderer);
-    XOffset += 12;
-  }
+    for (int ControllerIndex = 0; ControllerIndex < MAX_CONTROLLERS;
+         ++ControllerIndex) {
 
-  int CountJoysticks = SDL_NumJoysticks();
-  int controller_index = 0;
-  for (int joystick_index = 0; joystick_index < CountJoysticks;
-       ++joystick_index) {
-    if (!SDL_IsGameController(joystick_index)) {
-      continue;
-    }
+      SDL_GameController *controller = ControllerHandles[ControllerIndex];
 
-    if (controller_index >= MAX_CONTROLLERS) {
-      break;
+      if (controller != 0 && SDL_GameControllerGetAttached(controller)) {
+        int16 StickX =
+            SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_LEFTX);
+
+        int16 StickY =
+            SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_LEFTY);
+
+        XOffset += 4 * (double)StickX / 32767.0;
+        YOffset += 4 * ((double)StickY / 32767.0);
+
+        if (SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_A)) {
+          SDL_Haptic *rumble = RumbleHandles[ControllerIndex];
+          if (rumble) {
+            SDL_HapticRumblePlay(rumble, 0.5f, 2000);
+          }
+        }
+      }
+
+      RenderWeirdGradient(buf, XOffset, YOffset);
+      SDLUpdateWindow(&buf, Window, Renderer);
     }
-    ControllerHandles[controller_index] =
-        SDL_GameControllerOpen(joystick_index);
-    controller_index++;
   }
 
   for (int i = 0; i < MAX_CONTROLLERS; i++) {
