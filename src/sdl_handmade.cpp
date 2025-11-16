@@ -1,9 +1,11 @@
 // #include "SDL_render.h"
+#include "SDL_audio.h"
 #include "SDL_events.h"
 #include "SDL_gamecontroller.h"
 #include "SDL_haptic.h"
 #include "SDL_joystick.h"
 #include "SDL_render.h"
+#include "SDL_stdinc.h"
 #include "SDL_video.h"
 #include <SDL.h>
 #include <cstdint>
@@ -19,6 +21,7 @@ SDL_Haptic *RumbleHandles[MAX_CONTROLLERS];
 // typedef unsigned char uint8;
 typedef uint8_t uint8;
 typedef uint32_t uint32;
+typedef int32_t int32;
 typedef int16_t int16;
 struct sdl_offscreen_buffer {
   // NOTE(casey): Pixels are alwasy 32-bits wide, Memory Order BB GG RR XX
@@ -147,8 +150,29 @@ void setup_controllers(void) {
   }
 }
 
+internal void SDLAudioCallback(void *UserData, Uint8 *AudioData, int Length) {
+  memset(AudioData, 0, Length);
+}
+
+void setup_audio(int32 SamplesPerSecond, int32 BufferSize) {
+  SDL_AudioSpec audio_settings = {0};
+  audio_settings.freq = SamplesPerSecond;
+  audio_settings.format = AUDIO_S16;
+  audio_settings.channels = 2;
+  audio_settings.samples = BufferSize;
+  audio_settings.callback = &SDLAudioCallback;
+
+  SDL_OpenAudio(&audio_settings, 0);
+}
+
+void cleanup() {
+  SDL_Quit();
+  SDL_CloseAudio();
+}
+
 int main(int argc, char *argv[]) {
-  SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_HAPTIC);
+  SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_HAPTIC |
+           SDL_INIT_AUDIO);
 
   SDL_Window *Window =
       SDL_CreateWindow("Handmade Hero", SDL_WINDOWPOS_UNDEFINED,
@@ -171,6 +195,7 @@ int main(int argc, char *argv[]) {
   SDLResizeTexture(&buf, Renderer, dimension.width, dimension.height);
   SDL_ShowWindow(Window);
   setup_controllers();
+  setup_audio(48000, 4096);
 
   bool Running = true;
 
@@ -218,6 +243,6 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  SDL_Quit();
+  cleanup();
   return (0);
 }
