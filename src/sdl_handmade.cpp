@@ -17,6 +17,14 @@
 #define MAX_CONTROLLERS 4
 SDL_GameController *ControllerHandles[MAX_CONTROLLERS];
 SDL_Haptic *RumbleHandles[MAX_CONTROLLERS];
+struct sdl_audio_ring_buffer {
+  int size;
+  int write_cursor;
+  int play_cursor;
+  void *data;
+};
+
+sdl_audio_ring_buffer AudioRingBuffer;
 
 // typedef unsigned char uint8;
 typedef uint8_t uint8;
@@ -151,18 +159,46 @@ void setup_controllers(void) {
 }
 
 internal void SDLAudioCallback(void *UserData, Uint8 *AudioData, int Length) {
-  memset(AudioData, 0, Length);
+  int32 sdl_buffer_size = 2048;
+  sdl_audio_ring_buffer *buf = (sdl_audio_ring_buffer *)UserData;
+
+  int region1_size = Length;
+  int region2_size = 0;
+  if (buf->play_cursor + Length > buf->size) {
+    region1_size = buf->size - buf->play_cursor;
+    region2_size = Length - region1_size;
+  }
+
+  memcpy(AudioData, (uint8 *)(buf->data) + buf->play_cursor, region1_size);
+  memcpy(&AudioData[region1_size], buf->data, region2_size);
+  buf->play_cursor = (buf->play_cursor + Length) % buf->size;
+  buf->write_cursor = (buf->play_cursor + sdl_buffer_size) % buf->size;
 }
 
-void setup_audio(int32 SamplesPerSecond, int32 BufferSize) {
+void setup_audio(int32 SamplesPerSecond, int32 BufferSizeBytes) {
   SDL_AudioSpec audio_settings = {0};
   audio_settings.freq = SamplesPerSecond;
-  audio_settings.format = AUDIO_S16;
+  audio_settings.format = AUDIO_S16LSB;
   audio_settings.channels = 2;
-  audio_settings.samples = BufferSize;
+  audio_settings.samples = 1024;
   audio_settings.callback = &SDLAudioCallback;
+  audio_settings.userdata = &AudioRingBuffer;
+
+  AudioRingBuffer.size = BufferSizeBytes;
+  AudioRingBuffer.data = malloc(BufferSizeBytes);
+  AudioRingBuffer.play_cursor = 0;
+  AudioRingBuffer.write_cursor = 0;
 
   SDL_OpenAudio(&audio_settings, 0);
+
+  printf("Initialised an Audio device at frequency %d Hz, %d Channels, buffer "
+         "size %d\n",
+         audio_settings.freq, audio_settings.channels, audio_settings.samples);
+
+  if (audio_settings.format != AUDIO_S16LSB) {
+    printf("Oops! We didn't get AUDIO_S16LSB as our sample format!\n");
+    SDL_CloseAudio();
+  }
 }
 
 void cleanup() {
@@ -191,11 +227,21 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
+  int SamplesPerSecond = 48000;
+  int ToneHz = 256;
+  int16 ToneVolume = 100;
+  uint32 RunningSampleIndex = 0;
+  int SquareWavePeriod = SamplesPerSecond / ToneHz;
+  int HalfSquareWavePeriod = SquareWavePeriod / 2;
+  int BytesPerSample = sizeof(int16) * 2;
+  int SecondaryBufferSize = SamplesPerSecond * BytesPerSample;
+  setup_audio(48000, SecondaryBufferSize);
+  bool sound_is_playing = false;
+
   struct sdl_offscreen_buffer buf{};
   SDLResizeTexture(&buf, Renderer, dimension.width, dimension.height);
   SDL_ShowWindow(Window);
   setup_controllers();
-  setup_audio(48000, 4096);
 
   bool Running = true;
 
@@ -231,10 +277,59 @@ int main(int argc, char *argv[]) {
           }
         }
       }
-
-      RenderWeirdGradient(buf, XOffset, YOffset);
-      SDLUpdateWindow(&buf, Window, Renderer);
     }
+
+    RenderWeirdGradient(buf, XOffset, YOffset);
+
+    SDL_LockAudio();
+    int ByteToLock = RunningSampleIndex * BytesPerSample % SecondaryBufferSize;
+    int BytesToWrite;
+    if (ByteToLock == AudioRingBuffer.play_cursor) {
+      BytesToWrite = SecondaryBufferSize;
+    } else if (ByteToLock > AudioRingBuffer.play_cursor) {
+      BytesToWrite = (SecondaryBufferSize - ByteToLock);
+      BytesToWrite += AudioRingBuffer.play_cursor;
+    } else {
+      BytesToWrite = AudioRingBuffer.play_cursor - ByteToLock;
+    }
+
+    void *region_1 = (uint8 *)AudioRingBuffer.data + ByteToLock;
+    int region1_size = BytesToWrite;
+    if (region1_size + ByteToLock > SecondaryBufferSize) {
+      region1_size = SecondaryBufferSize - ByteToLock;
+    }
+    void *region_2 = AudioRingBuffer.data;
+    int region2_size = BytesToWrite - region1_size;
+
+    int region1_sample_count = region1_size / BytesPerSample;
+    int16 *SampleOut = (int16 *)region_1;
+    for (int sample_index = 0; sample_index < region1_sample_count;
+         ++sample_index) {
+      int16 sample_value = ((RunningSampleIndex++ / HalfSquareWavePeriod) % 2)
+                               ? ToneVolume
+                               : -ToneVolume;
+      *SampleOut++ = sample_value;
+      *SampleOut++ = sample_value;
+    }
+
+    int region2_sample_count = region2_size / BytesPerSample;
+    SampleOut = (int16 *)region_2;
+    for (int sample_index = 0; sample_index < region2_sample_count;
+         ++sample_index) {
+      int16 sample_value = ((RunningSampleIndex++ / HalfSquareWavePeriod) % 2)
+                               ? ToneVolume
+                               : -ToneVolume;
+      *SampleOut++ = sample_value;
+      *SampleOut++ = sample_value;
+    }
+
+    SDL_UnlockAudio();
+    if (!sound_is_playing) {
+      SDL_PauseAudio(0);
+      sound_is_playing = true;
+    }
+
+    SDLUpdateWindow(&buf, Window, Renderer);
   }
 
   for (int i = 0; i < MAX_CONTROLLERS; i++) {
